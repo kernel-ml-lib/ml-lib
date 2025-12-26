@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+#
+# Machine Learning (ML) library configuration
+#
+
+config ML_LIB
+	tristate "ML library support"
+	help
+	  Machine Learning (ML) library has goal to provide
+	  the interaction and communication of ML models in
+	  user-space with kernel subsystems. It implements
+	  the basic code primitives that builds the way of
+	  ML models integration into Linux kernel functionality.
+
+	  If unsure, say N.
