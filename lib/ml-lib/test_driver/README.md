@@ -74,22 +74,22 @@ If built as a module:
 
 ```bash
 # Load the module
-sudo insmod lib/ml-lib/test_driver/ml_lib_test_dev.ko
+sudo insmod /lib/modules/$(uname -r)/build/lib/ml-lib/test_driver/ml_lib_test_dev.ko
 
 # Verify it's loaded
-lsmod | grep mllibdev
+sudo lsmod | grep ml_lib_test_dev
 
 # Check kernel messages
-dmesg | tail -20
+sudo dmesg | tail -20
 ```
 
 You should see messages like:
 ```
-mllibdev: Initializing driver
-mllibdev: Device number allocated: XXX:0
-mllibdev: Driver initialized successfully
-mllibdev: Device created at /dev/mllibdev
-mllibdev: Proc entry created at /proc/mllibdev
+ml_lib_test_dev: Initializing driver
+ml_lib_test_dev: Device number allocated: XXX:0
+ml_lib_test_dev: Driver initialized successfully
+ml_lib_test_dev: Device created at /dev/mllibdev
+ml_lib_test_dev: Proc entry created at /proc/mllibdev
 ```
 
 ## Testing the Driver
@@ -98,9 +98,11 @@ mllibdev: Proc entry created at /proc/mllibdev
 
 ```bash
 # Write data to the device
+sudo su
 echo "Hello, kernel!" > /dev/mllibdev
 
 # Read data back
+sudo su
 cat /dev/mllibdev
 
 # Check sysfs attributes
@@ -180,13 +182,13 @@ All tests completed successfully!
 
 ```bash
 # Remove the module
-sudo rmmod mllibdev
+sudo rmmod ml_lib_test_dev
 
 # Verify it's unloaded
-lsmod | grep mllibdev
+sudo lsmod | grep ml_lib_test_dev
 
 # Check cleanup messages
-dmesg | tail -10
+sudo dmesg | tail -10
 ```
 
 ## Troubleshooting

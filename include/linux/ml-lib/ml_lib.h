@@ -236,7 +236,9 @@ struct ml_lib_backpropagation_operations {
  * @correct_system_state: specialized method of subsystem state correction
  */
 struct ml_lib_model_operations {
-	int (*create)(struct ml_lib_model *ml_model);
+	int (*create)(struct ml_lib_model *ml_model,
+		      const char *subsystem_name,
+		      const char *model_name);
 	int (*init)(struct ml_lib_model *ml_model,
 		    struct ml_lib_model_options *options);
 	int (*re_init)(struct ml_lib_model *ml_model,
@@ -276,6 +278,8 @@ struct ml_lib_model_operations {
 /*
  * struct ml_lib_model - ML model declaration
  * @mode: ML model mode (enum ml_lib_system_mode)
+ * @subsystem_name: name of susbsystem
+ * @model_name: name of the ML model
  * @parent: parent kernel subsystem
  * @parent_state: parent kernel subsystem's state
  * @options: ML model options
@@ -286,6 +290,8 @@ struct ml_lib_model_operations {
  */
 struct ml_lib_model {
 	atomic_t mode;
+	const char *subsystem_name;
+	const char *model_name;
 
 	struct ml_lib_subsystem *parent;
 	struct ml_lib_subsystem_state * __rcu parent_state;
@@ -297,10 +303,10 @@ struct ml_lib_model {
 	struct ml_lib_request_config_operations *request_config_ops;
 };
 
+/* ML library API */
+
 struct ml_lib_model *allocate_ml_model(size_t size, gfp_t gfp);
 void free_ml_model(struct ml_lib_model *ml_model);
-struct ml_lib_model_options *allocate_ml_model_options(size_t size, gfp_t gfp);
-void free_ml_model_options(struct ml_lib_model_options *options);
 struct ml_lib_subsystem *allocate_subsystem_object(size_t size, gfp_t gfp);
 void free_subsystem_object(struct ml_lib_subsystem *object);
 struct ml_lib_subsystem_state *allocate_subsystem_state(size_t size, gfp_t gfp);
@@ -310,7 +316,47 @@ void free_dataset(struct ml_lib_dataset *dataset);
 struct ml_lib_request_config *allocate_request_config(size_t size, gfp_t gfp);
 void free_request_config(struct ml_lib_request_config *config);
 
-int generic_create_ml_model(struct ml_lib_model *ml_model);
+int ml_model_create(struct ml_lib_model *ml_model,
+		    const char *subsystem_name,
+		    const char *model_name);
+int ml_model_init(struct ml_lib_model *ml_model,
+		  struct ml_lib_model_options *options);
+int ml_model_re_init(struct ml_lib_model *ml_model,
+		     struct ml_lib_model_options *options);
+int ml_model_start(struct ml_lib_model *ml_model,
+		   struct ml_lib_model_run_config *config);
+int ml_model_stop(struct ml_lib_model *ml_model);
+void ml_model_destroy(struct ml_lib_model *ml_model);
+struct ml_lib_subsystem_state *get_system_state(struct ml_lib_model *ml_model);
+struct ml_lib_dataset *get_dataset(struct ml_lib_model *ml_model,
+				   struct ml_lib_request_config *config,
+				   struct ml_lib_user_space_request *request);
+int ml_model_preprocess_data(struct ml_lib_model *ml_model,
+			     struct ml_lib_dataset *dataset);
+int ml_model_publish_data(struct ml_lib_model *ml_model,
+			  struct ml_lib_dataset *dataset,
+			  struct ml_lib_user_space_notification *notify);
+int ml_model_preprocess_recommendation(struct ml_lib_model *ml_model,
+			 struct ml_lib_user_space_recommendation *hint);
+int estimate_system_state(struct ml_lib_model *ml_model);
+int apply_ml_model_recommendation(struct ml_lib_model *ml_model,
+			 struct ml_lib_user_space_recommendation *hint);
+int execute_ml_model_operation(struct ml_lib_model *ml_model,
+			 struct ml_lib_user_space_recommendation *hint,
+			 struct ml_lib_user_space_request *request);
+int estimate_ml_model_efficiency(struct ml_lib_model *ml_model,
+			 struct ml_lib_user_space_recommendation *hint,
+			 struct ml_lib_user_space_request *request);
+int ml_model_error_backpropagation(struct ml_lib_model *ml_model,
+			    struct ml_lib_backpropagation_feedback *feedback,
+			    struct ml_lib_user_space_notification *notify);
+int correct_system_state(struct ml_lib_model *ml_model);
+
+/* Generic implementation of ML model's methods */
+
+int generic_create_ml_model(struct ml_lib_model *ml_model,
+			    const char *subsystem_name,
+			    const char *model_name);
 int generic_init_ml_model(struct ml_lib_model *ml_model,
 			  struct ml_lib_model_options *options);
 int generic_re_init_ml_model(struct ml_lib_model *ml_model,

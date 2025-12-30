@@ -17,6 +17,7 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/mutex.h>
+#include <linux/ml-lib/ml_lib.h>
 
 #define DEVICE_NAME "mllibdev"
 #define CLASS_NAME "ml_lib_test"
@@ -27,11 +28,6 @@
 #define ML_LIB_TEST_DEV_IOCRESET    _IO(ML_LIB_TEST_DEV_IOC_MAGIC, 0)
 #define ML_LIB_TEST_DEV_IOCGETSIZE  _IOR(ML_LIB_TEST_DEV_IOC_MAGIC, 1, int)
 #define ML_LIB_TEST_DEV_IOCSETSIZE  _IOW(ML_LIB_TEST_DEV_IOC_MAGIC, 2, int)
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Viacheslav Dubeyko <slava@dubeyko.com>");
-MODULE_DESCRIPTION("ML libraray testing character device driver");
-MODULE_VERSION("1.0");
 
 /* Device data structure */
 struct ml_lib_test_dev_data {
@@ -44,7 +40,11 @@ struct ml_lib_test_dev_data {
 	unsigned long access_count;
 	unsigned long read_count;
 	unsigned long write_count;
+
+	struct ml_lib_model *ml_model1;
 };
+
+#define ML_MODEL_1_NAME "ml_model1"
 
 static dev_t dev_number;
 static struct class *ml_lib_test_dev_class;
@@ -283,6 +283,7 @@ static const struct proc_ops ml_lib_test_dev_proc_ops = {
 /* Module initialization */
 static int __init ml_lib_test_dev_init(void)
 {
+	struct ml_lib_model_options options = {};
 	int ret;
 
 	pr_info("ml_lib_test_dev: Initializing driver\n");
@@ -358,6 +359,30 @@ static int __init ml_lib_test_dev_init(void)
 		goto err_sysfs_remove;
 	}
 
+	dev_data->ml_model1 = allocate_ml_model(sizeof(struct ml_lib_model),
+						GFP_KERNEL);
+	if (IS_ERR(dev_data->ml_model1)) {
+		ret = PTR_ERR(dev_data->ml_model1);
+		pr_err("ml_lib_test_dev: Failed to allocate ML model\n");
+		goto err_procfs_remove;
+	} else if (!dev_data->ml_model1) {
+		ret = -ENOMEM;
+		pr_err("ml_lib_test_dev: Failed to allocate ML model\n");
+		goto err_procfs_remove;
+	}
+
+	ret = ml_model_create(dev_data->ml_model1, CLASS_NAME, ML_MODEL_1_NAME);
+	if (ret < 0) {
+		pr_err("ml_lib_test_dev: Failed to create ML model\n");
+		goto err_ml_model_free;
+	}
+
+	ret = ml_model_init(dev_data->ml_model1, &options);
+	if (ret < 0) {
+		pr_err("ml_lib_test_dev: Failed to init ML model\n");
+		goto err_ml_model_destroy;
+	}
+
 	pr_info("ml_lib_test_dev: Driver initialized successfully\n");
 	pr_info("ml_lib_test_dev: Device created at /dev/%s\n",
 		DEVICE_NAME);
@@ -366,6 +391,12 @@ static int __init ml_lib_test_dev_init(void)
 
 	return 0;
 
+err_ml_model_destroy:
+	ml_model_destroy(dev_data->ml_model1);
+err_ml_model_free:
+	free_ml_model(dev_data->ml_model1);
+err_procfs_remove:
+	proc_remove(proc_entry);
 err_sysfs_remove:
 	sysfs_remove_group(&dev_data->device->kobj,
 			   &ml_lib_test_dev_attr_group);
@@ -388,6 +419,10 @@ err_free_data:
 static void __exit ml_lib_test_dev_exit(void)
 {
 	pr_info("ml_lib_test_dev: Cleaning up driver\n");
+
+	/* Destroy ML model */
+	ml_model_destroy(dev_data->ml_model1);
+	free_ml_model(dev_data->ml_model1);
 
 	/* Remove procfs entry */
 	proc_remove(proc_entry);
@@ -417,3 +452,8 @@ static void __exit ml_lib_test_dev_exit(void)
 
 module_init(ml_lib_test_dev_init);
 module_exit(ml_lib_test_dev_exit);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Viacheslav Dubeyko <slava@dubeyko.com>");
+MODULE_DESCRIPTION("ML libraray testing character device driver");
+MODULE_VERSION("1.0");

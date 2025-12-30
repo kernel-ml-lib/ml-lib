@@ -125,7 +125,7 @@ static void test_ioctl(int fd)
 	print_separator("IOCTL Tests");
 
 	/* Get current size */
-	ret = ioctl(fd, SIMPLEDEV_IOCGETSIZE, &size);
+	ret = ioctl(fd, ML_LIB_TEST_DEV_IOCGETSIZE, &size);
 	if (ret < 0) {
 		perror("IOCTL GETSIZE failed");
 		return;
