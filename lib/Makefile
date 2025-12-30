@@ -333,4 +333,4 @@ obj-$(CONFIG_FIRMWARE_TABLE) += fw_table.o
 
 subdir-$(CONFIG_FORTIFY_SOURCE) += test_fortify
 
-obj-$(CONFIG_ML_LIB)		+= ml_lib/
+obj-$(CONFIG_ML_LIB) += ml-lib/

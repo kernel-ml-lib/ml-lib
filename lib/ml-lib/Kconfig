@@ -14,3 +14,5 @@ config ML_LIB
 	  ML models integration into Linux kernel functionality.
 
 	  If unsure, say N.
+
+source "lib/ml-lib/test_driver/Kconfig"
