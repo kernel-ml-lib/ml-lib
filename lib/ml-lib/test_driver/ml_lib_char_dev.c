@@ -371,7 +371,8 @@ static int __init ml_lib_test_dev_init(void)
 		goto err_procfs_remove;
 	}
 
-	ret = ml_model_create(dev_data->ml_model1, CLASS_NAME, ML_MODEL_1_NAME);
+	ret = ml_model_create(dev_data->ml_model1, CLASS_NAME,
+			      ML_MODEL_1_NAME, &dev_data->device->kobj);
 	if (ret < 0) {
 		pr_err("ml_lib_test_dev: Failed to create ML model\n");
 		goto err_ml_model_free;

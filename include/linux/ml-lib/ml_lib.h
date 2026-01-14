@@ -236,9 +236,7 @@ struct ml_lib_backpropagation_operations {
  * @correct_system_state: specialized method of subsystem state correction
  */
 struct ml_lib_model_operations {
-	int (*create)(struct ml_lib_model *ml_model,
-		      const char *subsystem_name,
-		      const char *model_name);
+	int (*create)(struct ml_lib_model *ml_model);
 	int (*init)(struct ml_lib_model *ml_model,
 		    struct ml_lib_model_options *options);
 	int (*re_init)(struct ml_lib_model *ml_model,
@@ -287,6 +285,8 @@ struct ml_lib_model_operations {
  * @system_state_ops: subsystem state specialized operations
  * @dataset_ops: dataset specialized operations
  * @request_config_ops: specialized dataset configuration operations
+ * @kobj: /sys/<subsystem>/<ml_model>/ ML model object
+ * @kobj_unregister: completion state for <ml_model> kernel object
  */
 struct ml_lib_model {
 	atomic_t mode;
@@ -301,24 +301,29 @@ struct ml_lib_model {
 	struct ml_lib_subsystem_state_operations *system_state_ops;
 	struct ml_lib_dataset_operations *dataset_ops;
 	struct ml_lib_request_config_operations *request_config_ops;
+
+	/* /sys/<subsystem>/<ml_model>/ */
+	struct kobject kobj;
+	struct completion kobj_unregister;
 };
 
 /* ML library API */
 
-struct ml_lib_model *allocate_ml_model(size_t size, gfp_t gfp);
+void *allocate_ml_model(size_t size, gfp_t gfp);
 void free_ml_model(struct ml_lib_model *ml_model);
-struct ml_lib_subsystem *allocate_subsystem_object(size_t size, gfp_t gfp);
+void *allocate_subsystem_object(size_t size, gfp_t gfp);
 void free_subsystem_object(struct ml_lib_subsystem *object);
-struct ml_lib_subsystem_state *allocate_subsystem_state(size_t size, gfp_t gfp);
+void *allocate_subsystem_state(size_t size, gfp_t gfp);
 void free_subsystem_state(struct ml_lib_subsystem_state *state);
-struct ml_lib_dataset *allocate_dataset(size_t size, gfp_t gfp);
+void *allocate_dataset(size_t size, gfp_t gfp);
 void free_dataset(struct ml_lib_dataset *dataset);
-struct ml_lib_request_config *allocate_request_config(size_t size, gfp_t gfp);
+void *allocate_request_config(size_t size, gfp_t gfp);
 void free_request_config(struct ml_lib_request_config *config);
 
 int ml_model_create(struct ml_lib_model *ml_model,
 		    const char *subsystem_name,
-		    const char *model_name);
+		    const char *model_name,
+		    struct kobject *subsystem_kobj);
 int ml_model_init(struct ml_lib_model *ml_model,
 		  struct ml_lib_model_options *options);
 int ml_model_re_init(struct ml_lib_model *ml_model,
@@ -354,9 +359,7 @@ int correct_system_state(struct ml_lib_model *ml_model);
 
 /* Generic implementation of ML model's methods */
 
-int generic_create_ml_model(struct ml_lib_model *ml_model,
-			    const char *subsystem_name,
-			    const char *model_name);
+int generic_create_ml_model(struct ml_lib_model *ml_model);
 int generic_init_ml_model(struct ml_lib_model *ml_model,
 			  struct ml_lib_model_options *options);
 int generic_re_init_ml_model(struct ml_lib_model *ml_model,
@@ -391,28 +394,5 @@ int generic_error_backpropagation(struct ml_lib_model *ml_model,
 			    struct ml_lib_backpropagation_feedback *feedback,
 			    struct ml_lib_user_space_notification *notify);
 int generic_correct_system_state(struct ml_lib_model *ml_model);
-
-/*
- * default_ml_model_ops - default ML model operations
- */
-struct ml_lib_model_operations default_ml_model_ops = {
-	.create				= generic_create_ml_model,
-	.init				= generic_init_ml_model,
-	.re_init			= generic_re_init_ml_model,
-	.start				= generic_start_ml_model,
-	.stop				= generic_stop_ml_model,
-	.destroy			= generic_destroy_ml_model,
-	.get_system_state		= generic_get_system_state,
-	.get_dataset			= generic_get_dataset,
-	.preprocess_data		= generic_preprocess_data,
-	.publish_data			= generic_publish_data,
-	.preprocess_recommendation	= generic_preprocess_recommendation,
-	.estimate_system_state		= generic_estimate_system_state,
-	.apply_recommendation		= generic_apply_recommendation,
-	.execute_operation		= generic_execute_operation,
-	.estimate_efficiency		= generic_estimate_efficiency,
-	.error_backpropagation		= generic_error_backpropagation,
-	.correct_system_state		= generic_correct_system_state,
-};
 
 #endif /* _LINUX_ML_LIB_H */
