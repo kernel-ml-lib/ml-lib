@@ -29,7 +29,20 @@ enum ml_lib_system_mode {
 	ML_LIB_MODE_MAX
 };
 
+enum {
+	ML_LIB_UNKNOWN_MODEL_STATE,
+	ML_LIB_MODEL_CREATED,
+	ML_LIB_MODEL_INITIALIZED,
+	ML_LIB_MODEL_STARTED,
+	ML_LIB_MODEL_RUNNING,
+	ML_LIB_MODEL_STOPPED,
+	ML_LIB_MODEL_SHUTTING_DOWN,
+	ML_LIB_MODEL_STATE_MAX
+};
+
 struct ml_lib_model;
+
+#define ML_LIB_SLEEP_TIMEOUT_DEFAULT	(10)
 
 /*
  * struct ml_lib_model_options - ML model global options
@@ -57,10 +70,13 @@ struct ml_lib_model_run_config {
  * struct ml_lib_subsystem - kernel subsystem object
  * @type: object type
  * @size: number of bytes in allocated object
+ * @private: private data of subsystem
  */
 struct ml_lib_subsystem {
 	atomic_t type;
 	size_t size;
+
+	void *private;
 };
 
 enum {
@@ -123,6 +139,9 @@ struct ml_lib_dataset {
 enum {
 	ML_LIB_UNKNOWN_DATASET_TYPE,
 	ML_LIB_EMPTY_DATASET,
+	ML_LIB_VALUE_DATASET,
+	ML_LIB_STRUCTURE_DATASET,
+	ML_LIB_MEMORY_STREAM_DATASET,
 	ML_LIB_DATASET_TYPE_MAX
 };
 
@@ -143,8 +162,8 @@ struct ml_lib_dataset_operations {
 	void (*free)(struct ml_lib_dataset *dataset);
 	int (*init)(struct ml_lib_dataset *dataset);
 	int (*destroy)(struct ml_lib_dataset *dataset);
-	struct ml_lib_dataset *
-	    (*extract)(struct ml_lib_model *ml_model);
+	int (*extract)(struct ml_lib_model *ml_model,
+			struct ml_lib_dataset *dataset);
 	int (*preprocess_data)(struct ml_lib_model *ml_model,
 				struct ml_lib_dataset *dataset);
 	int (*publish_data)(struct ml_lib_model *ml_model,
@@ -247,10 +266,8 @@ struct ml_lib_model_operations {
 	void (*destroy)(struct ml_lib_model *ml_model);
 	struct ml_lib_subsystem_state *
 		(*get_system_state)(struct ml_lib_model *ml_model);
-	struct ml_lib_dataset *
-		(*get_dataset)(struct ml_lib_model *ml_model,
-				struct ml_lib_request_config *config,
-				struct ml_lib_user_space_request *request);
+	int (*get_dataset)(struct ml_lib_model *ml_model,
+			   struct ml_lib_dataset *dataset);
 	int (*preprocess_data)(struct ml_lib_model *ml_model,
 				struct ml_lib_dataset *dataset);
 	int (*publish_data)(struct ml_lib_model *ml_model,
@@ -276,6 +293,7 @@ struct ml_lib_model_operations {
 /*
  * struct ml_lib_model - ML model declaration
  * @mode: ML model mode (enum ml_lib_system_mode)
+ * @state: ML model state
  * @subsystem_name: name of susbsystem
  * @model_name: name of the ML model
  * @parent: parent kernel subsystem
@@ -290,12 +308,20 @@ struct ml_lib_model_operations {
  */
 struct ml_lib_model {
 	atomic_t mode;
+	atomic_t state;
 	const char *subsystem_name;
 	const char *model_name;
 
 	struct ml_lib_subsystem *parent;
+
+	spinlock_t parent_state_lock;
 	struct ml_lib_subsystem_state * __rcu parent_state;
+
+	spinlock_t options_lock;
 	struct ml_lib_model_options * __rcu options;
+
+	spinlock_t dataset_lock;
+	struct ml_lib_dataset * __rcu dataset;
 
 	struct ml_lib_model_operations *model_ops;
 	struct ml_lib_subsystem_state_operations *system_state_ops;
@@ -313,6 +339,8 @@ void *allocate_ml_model(size_t size, gfp_t gfp);
 void free_ml_model(struct ml_lib_model *ml_model);
 void *allocate_subsystem_object(size_t size, gfp_t gfp);
 void free_subsystem_object(struct ml_lib_subsystem *object);
+void *allocate_ml_model_options(size_t size, gfp_t gfp);
+void free_ml_model_options(struct ml_lib_model_options *options);
 void *allocate_subsystem_state(size_t size, gfp_t gfp);
 void free_subsystem_state(struct ml_lib_subsystem_state *state);
 void *allocate_dataset(size_t size, gfp_t gfp);
@@ -333,9 +361,10 @@ int ml_model_start(struct ml_lib_model *ml_model,
 int ml_model_stop(struct ml_lib_model *ml_model);
 void ml_model_destroy(struct ml_lib_model *ml_model);
 struct ml_lib_subsystem_state *get_system_state(struct ml_lib_model *ml_model);
-struct ml_lib_dataset *get_dataset(struct ml_lib_model *ml_model,
-				   struct ml_lib_request_config *config,
-				   struct ml_lib_user_space_request *request);
+int ml_model_get_dataset(struct ml_lib_model *ml_model,
+			 struct ml_lib_request_config *config,
+			 struct ml_lib_user_space_request *request);
+int ml_model_discard_dataset(struct ml_lib_model *ml_model);
 int ml_model_preprocess_data(struct ml_lib_model *ml_model,
 			     struct ml_lib_dataset *dataset);
 int ml_model_publish_data(struct ml_lib_model *ml_model,
@@ -370,10 +399,8 @@ int generic_stop_ml_model(struct ml_lib_model *ml_model);
 void generic_destroy_ml_model(struct ml_lib_model *ml_model);
 struct ml_lib_subsystem_state *
 generic_get_system_state(struct ml_lib_model *ml_model);
-struct ml_lib_dataset *
-generic_get_dataset(struct ml_lib_model *ml_model,
-		    struct ml_lib_request_config *config,
-		    struct ml_lib_user_space_request *request);
+int generic_get_dataset(struct ml_lib_model *ml_model,
+			struct ml_lib_dataset *dataset);
 int generic_preprocess_data(struct ml_lib_model *ml_model,
 			    struct ml_lib_dataset *dataset);
 int generic_publish_data(struct ml_lib_model *ml_model,

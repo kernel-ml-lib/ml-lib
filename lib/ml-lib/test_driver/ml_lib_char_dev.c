@@ -33,9 +33,12 @@
 struct ml_lib_test_dev_data {
 	struct cdev cdev;
 	struct device *device;
-	char *buffer;
-	size_t buffer_size;
-	size_t data_size;
+	char *dataset_buf;
+	size_t dataset_buf_size;
+	size_t dataset_size;
+	char *recommendations_buf;
+	size_t recommendations_buf_size;
+	size_t recommendations_size;
 	struct mutex lock;
 	unsigned long access_count;
 	unsigned long read_count;
@@ -46,10 +49,41 @@ struct ml_lib_test_dev_data {
 
 #define ML_MODEL_1_NAME "ml_model1"
 
+static
+int ml_lib_test_dev_extract_dataset(struct ml_lib_model *ml_model,
+				    struct ml_lib_dataset *dataset);
+
+static struct ml_lib_dataset_operations ml_lib_test_dev_dataset_ops = {
+	.extract = ml_lib_test_dev_extract_dataset,
+};
+
 static dev_t dev_number;
 static struct class *ml_lib_test_dev_class;
 static struct ml_lib_test_dev_data *dev_data;
 static struct proc_dir_entry *proc_entry;
+
+/* ML model operations */
+static
+int ml_lib_test_dev_extract_dataset(struct ml_lib_model *ml_model,
+				    struct ml_lib_dataset *dataset)
+{
+	struct ml_lib_test_dev_data *data =
+		(struct ml_lib_test_dev_data *)ml_model->parent->private;
+	u8 pattern;
+
+	mutex_lock(&data->lock);
+	get_random_bytes(&pattern, 1);
+	memset(data->dataset_buf, pattern, data->dataset_buf_size);
+	data->dataset_size = data->dataset_buf_size;
+	atomic_set(&dataset->type, ML_LIB_MEMORY_STREAM_DATASET);
+	atomic_set(&dataset->state, ML_LIB_DATASET_CLEAN);
+	dataset->allocated_size = data->dataset_buf_size;
+	dataset->portion_offset = 0;
+	dataset->portion_size = data->dataset_buf_size;
+	mutex_unlock(&data->lock);
+
+	return 0;
+}
 
 /* File operations */
 static int ml_lib_test_dev_open(struct inode *inode, struct file *file)
@@ -85,14 +119,14 @@ static ssize_t ml_lib_test_dev_read(struct file *file, char __user *buf,
 
 	mutex_lock(&data->lock);
 
-	if (*ppos >= data->data_size) {
+	if (*ppos >= data->dataset_size) {
 		mutex_unlock(&data->lock);
 		return 0;
 	}
 
-	to_read = min(count, data->data_size - (size_t)*ppos);
+	to_read = min(count, data->dataset_size - (size_t)*ppos);
 
-	ret = copy_to_user(buf, data->buffer + *ppos, to_read);
+	ret = copy_to_user(buf, data->dataset_buf + *ppos, to_read);
 	if (ret) {
 		mutex_unlock(&data->lock);
 		return -EFAULT;
@@ -117,22 +151,22 @@ static ssize_t ml_lib_test_dev_write(struct file *file, const char __user *buf,
 
 	mutex_lock(&data->lock);
 
-	if (*ppos >= data->buffer_size) {
+	if (*ppos >= data->recommendations_buf_size) {
 		mutex_unlock(&data->lock);
 		return -ENOSPC;
 	}
 
-	to_write = min(count, data->buffer_size - (size_t)*ppos);
+	to_write = min(count, data->recommendations_buf_size - (size_t)*ppos);
 
-	ret = copy_from_user(data->buffer + *ppos, buf, to_write);
+	ret = copy_from_user(data->recommendations_buf + *ppos, buf, to_write);
 	if (ret) {
 		mutex_unlock(&data->lock);
 		return -EFAULT;
 	}
 
 	*ppos += to_write;
-	if (*ppos > data->data_size)
-		data->data_size = *ppos;
+	if (*ppos > data->recommendations_size)
+		data->recommendations_size = *ppos;
 
 	data->write_count++;
 
@@ -152,15 +186,19 @@ static long ml_lib_test_dev_ioctl(struct file *file, unsigned int cmd,
 	switch (cmd) {
 	case ML_LIB_TEST_DEV_IOCRESET:
 		mutex_lock(&data->lock);
-		memset(data->buffer, 0, data->buffer_size);
-		data->data_size = 0;
+		memset(data->dataset_buf,
+			0, data->dataset_buf_size);
+		data->dataset_size = 0;
+		memset(data->recommendations_buf,
+			0, data->recommendations_buf_size);
+		data->recommendations_size = 0;
 		mutex_unlock(&data->lock);
 		pr_info("ml_lib_test_dev: Buffer reset via IOCTL\n");
 		break;
 
 	case ML_LIB_TEST_DEV_IOCGETSIZE:
 		mutex_lock(&data->lock);
-		size = data->data_size;
+		size = data->dataset_size;
 		mutex_unlock(&data->lock);
 		if (copy_to_user((int __user *)arg, &size, sizeof(size)))
 			return -EFAULT;
@@ -169,10 +207,10 @@ static long ml_lib_test_dev_ioctl(struct file *file, unsigned int cmd,
 	case ML_LIB_TEST_DEV_IOCSETSIZE:
 		if (copy_from_user(&size, (int __user *)arg, sizeof(size)))
 			return -EFAULT;
-		if (size < 0 || size > data->buffer_size)
+		if (size < 0 || size > data->recommendations_buf_size)
 			return -EINVAL;
 		mutex_lock(&data->lock);
-		data->data_size = size;
+		data->recommendations_size = size;
 		mutex_unlock(&data->lock);
 		pr_info("ml_lib_test_dev: Data size set to %d via IOCTL\n", size);
 		break;
@@ -200,7 +238,7 @@ static ssize_t buffer_size_show(struct device *dev,
 {
 	struct ml_lib_test_dev_data *data = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%zu\n", data->buffer_size);
+	return sprintf(buf, "%zu\n", data->dataset_buf_size);
 }
 
 static ssize_t data_size_show(struct device *dev,
@@ -210,7 +248,7 @@ static ssize_t data_size_show(struct device *dev,
 	size_t size;
 
 	mutex_lock(&data->lock);
-	size = data->data_size;
+	size = data->dataset_size;
 	mutex_unlock(&data->lock);
 
 	return sprintf(buf, "%zu\n", size);
@@ -259,8 +297,8 @@ static int ml_lib_test_dev_proc_show(struct seq_file *m, void *v)
 	seq_printf(m, "ML Library Testing Device Driver Information\n");
 	seq_printf(m, "=================================\n");
 	seq_printf(m, "Device name:     %s\n", DEVICE_NAME);
-	seq_printf(m, "Buffer size:     %zu bytes\n", data->buffer_size);
-	seq_printf(m, "Data size:       %zu bytes\n", data->data_size);
+	seq_printf(m, "Buffer size:     %zu bytes\n", data->dataset_buf_size);
+	seq_printf(m, "Data size:       %zu bytes\n", data->dataset_size);
 	seq_printf(m, "Access count:    %lu\n", data->access_count);
 	seq_printf(m, "Read count:      %lu\n", data->read_count);
 	seq_printf(m, "Write count:     %lu\n", data->write_count);
@@ -283,7 +321,7 @@ static const struct proc_ops ml_lib_test_dev_proc_ops = {
 /* Module initialization */
 static int __init ml_lib_test_dev_init(void)
 {
-	struct ml_lib_model_options options = {};
+	struct ml_lib_model_options *options;
 	int ret;
 
 	pr_info("ml_lib_test_dev: Initializing driver\n");
@@ -293,22 +331,33 @@ static int __init ml_lib_test_dev_init(void)
 	if (!dev_data)
 		return -ENOMEM;
 
-	/* Allocate buffer */
-	dev_data->buffer = kzalloc(BUFFER_SIZE, GFP_KERNEL);
-	if (!dev_data->buffer) {
+	/* Allocate dataset buffer */
+	dev_data->dataset_buf = kzalloc(BUFFER_SIZE, GFP_KERNEL);
+	if (!dev_data->dataset_buf) {
 		ret = -ENOMEM;
 		goto err_free_data;
 	}
 
-	dev_data->buffer_size = BUFFER_SIZE;
-	dev_data->data_size = 0;
+	dev_data->dataset_buf_size = BUFFER_SIZE;
+	dev_data->dataset_size = 0;
+
+	/* Allocate recomendations buffer */
+	dev_data->recommendations_buf = kzalloc(BUFFER_SIZE, GFP_KERNEL);
+	if (!dev_data->recommendations_buf) {
+		ret = -ENOMEM;
+		goto err_free_dataset_buffer;
+	}
+
+	dev_data->recommendations_buf_size = BUFFER_SIZE;
+	dev_data->recommendations_size = 0;
+
 	mutex_init(&dev_data->lock);
 
 	/* Allocate device number */
 	ret = alloc_chrdev_region(&dev_number, 0, 1, DEVICE_NAME);
 	if (ret < 0) {
 		pr_err("ml_lib_test_dev: Failed to allocate device number\n");
-		goto err_free_buffer;
+		goto err_free_recommendations_buffer;
 	}
 
 	pr_info("ml_lib_test_dev: Device number allocated: %d:%d\n",
@@ -378,10 +427,26 @@ static int __init ml_lib_test_dev_init(void)
 		goto err_ml_model_free;
 	}
 
-	ret = ml_model_init(dev_data->ml_model1, &options);
+	dev_data->ml_model1->parent->private = dev_data;
+	dev_data->ml_model1->model_ops = NULL;
+	dev_data->ml_model1->dataset_ops = &ml_lib_test_dev_dataset_ops;
+
+	options = allocate_ml_model_options(sizeof(struct ml_lib_model_options),
+					    GFP_KERNEL);
+	if (IS_ERR(options)) {
+		ret = PTR_ERR(options);
+		pr_err("ml_lib_test_dev: Failed to allocate ML model options\n");
+		goto err_ml_model_destroy;
+	} else if (!options) {
+		ret = -ENOMEM;
+		pr_err("ml_lib_test_dev: Failed to allocate ML model options\n");
+		goto err_ml_model_destroy;
+	}
+
+	ret = ml_model_init(dev_data->ml_model1, options);
 	if (ret < 0) {
 		pr_err("ml_lib_test_dev: Failed to init ML model\n");
-		goto err_ml_model_destroy;
+		goto err_ml_model_options_free;
 	}
 
 	pr_info("ml_lib_test_dev: Driver initialized successfully\n");
@@ -392,6 +457,8 @@ static int __init ml_lib_test_dev_init(void)
 
 	return 0;
 
+err_ml_model_options_free:
+	free_ml_model_options(options);
 err_ml_model_destroy:
 	ml_model_destroy(dev_data->ml_model1);
 err_ml_model_free:
@@ -409,8 +476,10 @@ err_class_destroy:
 	class_destroy(ml_lib_test_dev_class);
 err_unregister_chrdev:
 	unregister_chrdev_region(dev_number, 1);
-err_free_buffer:
-	kfree(dev_data->buffer);
+err_free_recommendations_buffer:
+	kfree(dev_data->recommendations_buf);
+err_free_dataset_buffer:
+	kfree(dev_data->dataset_buf);
 err_free_data:
 	kfree(dev_data);
 	return ret;
@@ -445,7 +514,8 @@ static void __exit ml_lib_test_dev_exit(void)
 	unregister_chrdev_region(dev_number, 1);
 
 	/* Free buffers */
-	kfree(dev_data->buffer);
+	kfree(dev_data->recommendations_buf);
+	kfree(dev_data->dataset_buf);
 	kfree(dev_data);
 
 	pr_info("ml_lib_test_dev: Driver removed successfully\n");

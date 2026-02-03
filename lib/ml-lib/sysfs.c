@@ -39,12 +39,16 @@ struct ml_lib_feature_attr {
 enum {
 	ML_LIB_START_COMMAND,
 	ML_LIB_STOP_COMMAND,
+	ML_LIB_PREPARE_DATASET_COMMAND,
+	ML_LIB_DISCARD_DATASET_COMMAND,
 	ML_LIB_COMMAND_NUMBER
 };
 
 static const char *control_command_str[ML_LIB_COMMAND_NUMBER] = {
 	"start",
 	"stop",
+	"prepare_dataset",
+	"discard_dataset",
 };
 
 static ssize_t ml_lib_feature_control_store(struct ml_lib_feature_attr *attr,
@@ -72,6 +76,14 @@ static ssize_t ml_lib_feature_control_store(struct ml_lib_feature_attr *attr,
 
 	case ML_LIB_STOP_COMMAND:
 		err = ml_model_stop(ml_model);
+		break;
+
+	case ML_LIB_PREPARE_DATASET_COMMAND:
+		err = ml_model_get_dataset(ml_model, NULL, NULL);
+		break;
+
+	case ML_LIB_DISCARD_DATASET_COMMAND:
+		err = ml_model_discard_dataset(ml_model);
 		break;
 	}
 
